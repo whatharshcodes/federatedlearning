@@ -194,3 +194,163 @@ for epoch in range(40):
 # Final test set performance
 test_loss, test_accuracy = test(net, testloader)
 print(f"Final test set performance:\n\tloss {test_loss}\n\taccuracy {test_accuracy}")
+
+# Plotting the validation metrics
+epochs = range(1, 41)  # Adjust according to the number of epochs
+
+plt.figure(figsize=(12, 5))
+
+# Plot Validation Loss
+plt.subplot(1, 2, 1)
+plt.plot(epochs, validation_losses, 'b-o', label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Validation Loss Over Epochs')
+plt.legend()
+plt.grid(True)
+
+# Plot Validation Accuracy
+plt.subplot(1, 2, 2)
+plt.plot(epochs, validation_accuracies, 'r-o', label='Validation Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.title('Validation Accuracy Over Epochs')
+plt.legend()
+plt.grid(True)
+
+# Show the plots
+plt.tight_layout()
+plt.show()
+
+def set_parameters(net, parameters: List[np.ndarray]):
+    params_dict = zip(net.state_dict().keys(), parameters)
+    state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
+    net.load_state_dict(state_dict, strict=True)
+
+
+def get_parameters(net) -> List[np.ndarray]:
+    return [val.cpu().numpy() for _, val in net.state_dict().items()]
+    
+   class FlowerClient(fl.client.NumPyClient):
+    def __init__(self, net, trainloader, valloader):
+        self.net = net
+        self.trainloader = trainloader
+        self.valloader = valloader
+
+    def get_parameters(self, config):
+        return get_parameters(self.net)
+
+    def fit(self, parameters, config):
+        set_parameters(self.net, parameters)
+        train(self.net, self.trainloader, epochs=1)
+        return get_parameters(self.net), len(self.trainloader), {}
+
+    def evaluate(self, parameters, config):
+        set_parameters(self.net, parameters)
+        loss, accuracy = test(self.net, self.valloader)
+        return float(loss), len(self.valloader), {"accuracy": float(accuracy)}
+        
+        def client_fn(cid: str) -> FlowerClient:
+    """Create a Flower client representing a single organization."""
+
+    # Load model
+    net = Net().to(DEVICE)
+
+    # Load data (CIFAR-10)
+    # Note: each client gets a different trainloader/valloader, so each client
+    # will train and evaluate on their own unique data
+    trainloader = trainloaders[int(cid)]
+    valloader = valloaders[int(cid)]
+
+    # Create a  single Flower client representing a single organization
+    return FlowerClient(net, trainloader, valloader).to_client()
+    
+    # Create FedAvg strategy
+strategy = fl.server.strategy.FedAvg(
+    fraction_fit=1.0,  # Sample 100% of available clients for training
+    fraction_evaluate=0.5,  # Sample 50% of available clients for evaluation
+    min_fit_clients=10,  # Never sample less than 10 clients for training
+    min_evaluate_clients=5,  # Never sample less than 5 clients for evaluation
+    min_available_clients=10,  # Wait until all 10 clients are available
+)
+
+# Specify the resources each of your clients need. By default, each
+# client will be allocated 1x CPU and 0x GPUs
+client_resources = {"num_cpus": 1, "num_gpus": 0.0}
+if DEVICE.type == "cuda":
+    # here we are assigning an entire GPU for each client.
+    client_resources = {"num_cpus": 1, "num_gpus": 1.0}
+
+# Start simulation
+fl.simulation.start_simulation(
+    client_fn=client_fn,
+    num_clients=NUM_CLIENTS,
+    config=fl.server.ServerConfig(num_rounds=20),
+    strategy=strategy,
+    client_resources=client_resources,
+)
+
+
+def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
+    # Multiply accuracy of each client by number of examples used
+    accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics]
+    examples = [num_examples for num_examples, _ in metrics]
+
+    # Aggregate and return custom metric (weighted average)
+    return {"accuracy": sum(accuracies) / sum(examples)}
+    
+# Create FedAvg strategy
+strategy = fl.server.strategy.FedAvg(
+    fraction_fit=1.0,
+    fraction_evaluate=0.5,
+    min_fit_clients=10,
+    min_evaluate_clients=5,
+    min_available_clients=10,
+    evaluate_metrics_aggregation_fn=weighted_average,  # <-- pass the metric aggregation function
+)
+
+# Start simulation
+fl.simulation.start_simulation(
+    client_fn=client_fn,
+    num_clients=NUM_CLIENTS,
+    config=fl.server.ServerConfig(num_rounds=20),
+    strategy=strategy,
+    client_resources=client_resources,
+)
+
+
+# Provided data for federated learning output
+rounds = list(range(1, 21))
+losses = [
+    0.06564855835437775, 0.055744290542602534, 0.05214762487411499, 0.04917860360145569,
+    0.04748152976036071, 0.04585693078041077, 0.04529121458530426, 0.044416985082626335,
+    0.043022690248489384, 0.04283880763053895, 0.042376188731193545, 0.04181219084262848,
+    0.04079408128261566, 0.0405597298502922, 0.040055459880828856, 0.040156802046298984,
+    0.03929776152372361, 0.03856814625263214, 0.039083913195133206, 0.03837377440929413
+]
+accuracies = [
+    0.2572, 0.35219999999999996, 0.4002, 0.4364, 0.4593999999999999, 0.48040000000000005,
+    0.484, 0.49339999999999995, 0.5134000000000001, 0.5204, 0.5226000000000001, 0.5272,
+    0.5488, 0.55, 0.5494000000000001, 0.554, 0.569, 0.5791999999999999, 0.5635999999999999,
+    0.5641999999999999
+]
+
+# Plotting loss
+plt.figure(figsize=(12, 6))
+plt.plot(rounds, losses, marker='o', linestyle='-', color='b', label='Loss')
+plt.title('Federated Learning Loss Over Rounds')
+plt.xlabel('Rounds')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plotting accuracy
+plt.figure(figsize=(12, 6))
+plt.plot(rounds, accuracies, marker='o', linestyle='-', color='g', label='Accuracy')
+plt.title('Federated Learning Accuracy Over Rounds')
+plt.xlabel('Rounds')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True)
+plt.show()
